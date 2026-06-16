@@ -1,0 +1,79 @@
+# records.example.yaml
+#
+# Declarative desired state for DNS records managed by dns_manager.py.
+#
+# Copy this file to records.yaml and fill in your real zone_id.
+# records.yaml is excluded from git by .gitignore because it contains
+# your zone ID (not a secret, but not needed in a public repo either).
+#
+# How to find your Zone ID:
+#   Cloudflare Dashboard → your domain → Overview → right sidebar
+
+# The Cloudflare Zone ID for the domain you are managing.
+zone_id: "00000000000000000000000000000000"
+
+# Each record must have: type, name, content
+# Optional fields:  ttl (default 1 = Auto), proxied (default false),
+#                   priority (required for MX records)
+records:
+
+  # -----------------------------------------------------------------------
+  # MX Records — tell the internet which servers accept email for this domain
+  # Priority: lower number = higher preference (10 is tried before 20)
+  # -----------------------------------------------------------------------
+  - type: MX
+    name: "example.com"
+    content: "mail1.example-mailprovider.com"
+    priority: 10
+    ttl: 3600
+    proxied: false
+
+  - type: MX
+    name: "example.com"
+    content: "mail2.example-mailprovider.com"
+    priority: 20
+    ttl: 3600
+    proxied: false
+
+  # -----------------------------------------------------------------------
+  # SPF Record — declares which servers are allowed to send email as your domain
+  #
+  # Breakdown:
+  #   v=spf1                              required version tag
+  #   include:_spf.example-mailprovider.com  delegate to provider's SPF list
+  #   -all                                hard-fail anything not listed
+  #
+  # Important: a domain must have exactly ONE SPF TXT record at the root (@).
+  # -----------------------------------------------------------------------
+  - type: TXT
+    name: "example.com"
+    content: "v=spf1 include:_spf.example-mailprovider.com -all"
+    ttl: 3600
+    proxied: false
+
+  # -----------------------------------------------------------------------
+  # DKIM Record — points to your mail provider's published public signing key
+  #
+  # Most providers give you a CNAME rather than the raw TXT key material.
+  # The selector ("mail" here) must match what your provider gives you.
+  # Ask your mail provider for the correct selector and target values.
+  # -----------------------------------------------------------------------
+  - type: CNAME
+    name: "mail._domainkey.example.com"
+    content: "mail._domainkey.example-mailprovider.com"
+    ttl: 3600
+    proxied: false
+
+  # -----------------------------------------------------------------------
+  # DMARC Record — policy for what receivers do when SPF/DKIM checks fail,
+  # and where to send aggregate reports so you can monitor your email traffic.
+  #
+  # Recommended rollout:  p=none  (monitor) → p=quarantine → p=reject
+  # rua: address that receives aggregate XML reports (weekly digest)
+  # pct: percentage of mail the policy applies to (100 = all, default)
+  # -----------------------------------------------------------------------
+  - type: TXT
+    name: "_dmarc.example.com"
+    content: "v=DMARC1; p=none; rua=mailto:dmarc-reports@example.com; pct=100"
+    ttl: 3600
+    proxied: false
