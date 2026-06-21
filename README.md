@@ -60,6 +60,41 @@ _dmarc.example.com  TXT  "v=DMARC1; p=reject; rua=mailto:dmarc-reports@example.c
 
 ---
 
+## How it works
+
+The tool runs a single idempotent **reconcile loop**: it reads the declared desired state, asks Cloudflare for the current state, diffs the two per record, and only issues a write when something is actually out of sync. Running it twice in a row produces zero changes the second time.
+
+```mermaid
+flowchart TD
+    A["Load desired state<br/>(load_records_file → records.yaml)"] --> B["Fetch current records<br/>(fetch_existing_records → GET /zones/:id/dns_records, paginated)"]
+    B --> C{"For each desired record<br/>(MX / TXT-SPF / CNAME-DKIM / TXT-DMARC)"}
+    C --> D["Match on (type, name)<br/>find_matching_record"]
+    D --> E{Match found?}
+    E -->|No| F["CREATE record<br/>cf_post → POST dns_records"]
+    E -->|Yes| G{"Fields differ?<br/>records_differ<br/>(content / ttl / proxied / priority)"}
+    G -->|Yes| H["UPDATE record<br/>cf_put → PUT dns_records/:rid"]
+    G -->|No| I["SKIP<br/>(already correct — no-op)"]
+    F --> C
+    H --> C
+    I --> C
+    C -->|All records processed| J["Print summary<br/>created / updated / skipped"]
+```
+
+### Step by step
+
+1. **Read desired state.** `load_records_file()` parses and validates `records.yaml` (each record needs `type`, `name`, `content`; top level needs `zone_id` and a `records` list).
+2. **Fetch current records.** `fetch_existing_records()` calls `GET /zones/{zone_id}/dns_records` and walks every page (`result_info.total_pages`) so the diff sees all records, not just the first page.
+3. **Diff per record.** For each desired record, `find_matching_record()` looks for an existing record with the same `(type, name)`. `records_differ()` then compares only the fields this tool manages — `content`, `ttl` (Cloudflare's "Auto" is `1`), `proxied`, and `priority` (for `MX`/`SRV`/`URI`) — ignoring server-managed fields like `id` and `modified_on`.
+4. **Create / update / skip.** Based on the diff, `upsert_record()` returns one of three outcomes:
+   - no match → **CREATE** via `cf_post()` (POST)
+   - match but fields differ → **UPDATE** via `cf_put()` (Cloudflare replaces the record by ID with PUT, not PATCH)
+   - match and identical → **SKIP** (the no-op path that makes repeated runs safe)
+5. **Summarize.** The loop tallies `created` / `updated` / `skipped` and prints the totals. With `--dry-run`, steps 1–3 still run, but the POST/PUT calls in step 4 are skipped so you can preview the plan.
+
+The email-security records flow through the same loop using their native Cloudflare types: **SPF** and **DMARC** are `TXT` records, **DKIM** is a `CNAME` to the provider's published key, and mail routing uses `MX` records (which carry a `priority`).
+
+---
+
 ## Project Structure
 
 ```
